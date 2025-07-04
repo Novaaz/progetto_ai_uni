@@ -181,9 +181,7 @@ cython_debug/
 CityLearn.egg-info/
 build/
 logs/
-tests/
-plots/
-plot/
+results/
 
 # Additional build directories
 dist/

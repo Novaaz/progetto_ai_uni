@@ -1,10 +1,17 @@
-CityLearn==2.3.0 
+platformdirs
+requests
+simplejson
+nrel-pysam
+pyyaml
+torchvision
+scikit-learn==1.2.2
+openstudio==3.7.0
 gymnasium==0.29.1 
 pandas==2.2.3 
-scikit-learn==1.2.2 
 torch==2.7.0 
 tqdm==4.67.1 
 stable-baselines3==2.2.1
 seaborn==0.13.2
 numpy 
 stable-baselines3[extra]
+# pip install --no-deps CityLearn==2.3.0 
