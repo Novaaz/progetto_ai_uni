@@ -6,9 +6,11 @@ I vari modelli vengono anche salvati in una cartella per un uso futuro."""
 
 import random
 import os
+import sys
 import pandas as pd
-from ..src.training.train_functions import *
-from ..src.utils.constants import *
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.training.train_functions import *
+from src.utils.constants import *
 
 def create_seeds(n):
 	"""Genera una lista di semi casuali per la riproducibilità degli esperimenti.
@@ -61,9 +63,11 @@ def save_data_to_csv(data, file_path):
 	print(f"Data saved to {file_path}")
 
 def main():
-	n = input("Quanti semi vuoi generare? (default 5)") or 5
+	n = input("Quanti semi vuoi generare? (default 5)") or "5"
+	n = int(n)
 	seeds = initialize_res_dir(n)
-	m = input("Quante esecuzioni vuoi fare per ogni seed? (default 16 -> 8 normali e 8 dinamici)") or 8
+	m = input("Quante esecuzioni vuoi fare per ogni seed? (default 16 -> 8 normali e 8 dinamici)") or "8"
+	m = int(m)
 	noise_values = generate_noise_levels(m,0.0,0.9)
 	for seed in seeds:
 		for i in range(m):
@@ -78,6 +82,7 @@ def main():
 			model, _, _ = train_model_with_noise(noise_std=noise_std, dinamic_noise=True, seed=seed, model_id="model_"+str(i+m))
 			model_path = os.path.join(RESULTS_DIR, MODELS_DIR, str(seed), f"d_{noise_std:.2f}.zip")
 			model.save(model_path)
+	clean_dead_dir()
 
 if __name__ == "__main__":
 	main()

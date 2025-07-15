@@ -111,9 +111,8 @@ def save_boxplot_stats_csv(stats, directory):
     """
     Salva le statistiche dei boxplot in un CSV con timestamp.
     """
-    # Genera timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"boxplot_stats_{timestamp}.csv"
+    #timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"analysis.csv"
     filepath = os.path.join(directory, filename)
     
     # Converti stats in lista di righe per DataFrame
