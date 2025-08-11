@@ -106,13 +106,13 @@ class WeightedEnsemble:
 		
 		if method == 'weighted_average':
 			return self._weighted_average_predict(obs, deterministic, valid_models)
-		elif method == 'best_only':
-			return self._best_only_predict(obs, deterministic, valid_models)
+		# elif method == 'best_only':
+		# 	return self._best_only_predict(obs, deterministic, valid_models)
 		else:
 			raise ValueError(f"Metodo '{method}' non supportato")
 	
 	def _weighted_average_predict(self, obs, deterministic, valid_models):
-		"""Combina predizioni con media pesata solo per modelli validi"""
+		"""Combina predizioni con media pesata"""
 		actions = []
 		valid_weights = []
 		
@@ -142,10 +142,10 @@ class WeightedEnsemble:
 		
 		return weighted_action, None
 	
-	def _best_only_predict(self, obs, deterministic):
-		"""Usa solo il modello migliore"""
-		best_model_idx = np.argmax(self.weights)
-		return self.models[best_model_idx].predict(obs, deterministic=deterministic)
+	# def _best_only_predict(self, obs, deterministic):
+	# 	"""Usa solo il modello migliore"""
+	# 	best_model_idx = np.argmax(self.weights)
+	# 	return self.models[best_model_idx].predict(obs, deterministic=deterministic)
 	
 	def update_weights(self, recent_performance, learning_rate=None, method=None):
 		"""

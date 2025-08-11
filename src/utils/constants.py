@@ -4,6 +4,7 @@ costanti condivise tra vari moduli.
 
 from citylearn.reward_function import SolarPenaltyAndComfortReward
 
+EXCLUDED_NOISE_LEVELS = []  
 EPISODES = 35
 UPDATE_FREQ = 75
 BATCH_SIZE = 256

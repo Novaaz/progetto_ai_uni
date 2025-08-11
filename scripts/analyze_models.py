@@ -12,7 +12,6 @@ from src.utils.core import *
 from src.utils.constants import *
 
 from src.evaluation.evaluate_functions import evaluate_sac_performance
-from src.visualization.boxplot import plot_boxplots
 
 def get_models():
 	"""
@@ -277,13 +276,6 @@ def main():
 	timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
 	stats_path, best_path = save_analysis_results(statistics, best_models, timestamp)
 	
-	# Generazione dei boxplot
-	print(f"\n📊 Generazione boxplot...")
-	plot_path = os.path.join(RESULTS_DIR, PLOTS_DIR)
-	os.makedirs(plot_path, exist_ok=True)
-	
-	plot_boxplots(plot_path, all_results)
-	
 	# Mostra riassunto
 	print(f"\n🎯 === RIASSUNTO ===")
 	print(f"   Modelli analizzati: {len(all_results)}")
@@ -297,6 +289,8 @@ def main():
 		print(f"\n🏆 Top 3 migliori modelli:")
 		for i, model in enumerate(sorted_models[:3], 1):
 			print(f"   {i}. {model['name']} (reward: {model['reward']:.2f}, mediana gruppo: {model['median']:.2f})")
+	
+	print(f"\n💡 Per generare boxplot: python scripts/generate_boxplots.py")
 	
 	print("\n✅ Analisi completata!")
 	return stats_path, best_path

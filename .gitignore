@@ -182,6 +182,7 @@ CityLearn.egg-info/
 build/
 logs/
 results/
+archive/
 
 # Additional build directories
 dist/

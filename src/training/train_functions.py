@@ -1,3 +1,4 @@
+from datetime import datetime
 import numpy as np
 from stable_baselines3 import SAC
 from ..utils.constants import *
@@ -7,8 +8,10 @@ from ..evaluation.evaluate_functions import quick_evaluate
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from gymnasium.wrappers import TransformObservation
 from functools import partial
+import os
 
 _NOISE_MEMORY = {}
+_NOISE_ENVIRONMENTS = {}
 
 def _generate_noise_array(size, noise_type='gaussian', noise_level=0.15, noise_mean=0.0):
 	"""
@@ -52,11 +55,11 @@ def add_noise_to_observations(observations, noise_level=0.15, noise_mean=0.0, no
 	noisy_observations = obs.copy()
 
 	mask = np.zeros_like(noisy_observations, dtype=bool)
-	indices = [0, 1, 2, -1, -2, -3, -4]  # day_type, hour, occupant_count, power_outage, cooling_set_point
+	indices = [0, 1, 2, 5, 6, 12, 18, -1, -2, -3, -4]  # day_type, hour, occupant_count, diffuse_solar_irradiance, direct_solar_irradiance, electricity_pricing, cooling_demand,power_outage, cooling_set_point
 	mask[indices] = True
 
 	if dinamic_noise:
-		 noise = _generate_noise_array(len(noisy_observations), noise_type, noise_level, noise_mean)
+		noise = _generate_noise_array(len(noisy_observations), noise_type, noise_level, noise_mean)
 	else:
 		if name is None:
 			raise ValueError("Il parametro 'name' è obbligatorio quando dinamic_noise=False")
@@ -268,59 +271,43 @@ def generate_noise_levels(n_models=10, min_noise=0.0, max_noise=0.5):
 	return noise_levels.tolist()
 
 def train_model_with_noise(noise_std, dinamic_noise, seed, model_id):
-	"""
-	Allena un singolo modello SAC con un livello di rumore specificato
-	
-	Parameters:
-	noise_std: float - Deviazione standard del rumore gaussiano
-	seed: int - Seed per la riproducibilità
-	model_id: int - ID del modello per il tracking
-	
-	Returns:
-	tuple: (modello_allenato, dati_training, noise_std_usato)
-	"""
-	print(f"📈 Training Modello {model_id} | Noise STD: {noise_std:.4f}")
-	
-	try:
-		if noise_std == 0.0:
-			train_env = CityLearnEnv(**ENV_CONFIG)
-			train_env = StableBaselines3Wrapper(NormalizedSpaceWrapper(train_env))
-			print(f"  🔹 Ambiente pulito (no noise)")
-		else:
-			train_env = CityLearnEnv(**ENV_CONFIG)
-			train_env = StableBaselines3Wrapper(NormalizedSpaceWrapper(train_env))
-			train_env = TransformObservation(train_env, partial(
-				add_noise_to_observations, 
-				noise_type='gaussian',
-				dinamic_noise=dinamic_noise,
-				name=model_id,
-				noise_level=noise_std,
-				noise_mean=0.0
-			))
-			print(f"  🔸 Ambiente con rumore gaussiano (σ={noise_std:.4f}) dinamico = {dinamic_noise}")
-		
-		_, trained_model, training_rewards, timesteps = train_sac(
-			env=train_env,
-			seed=seed,
-			track_rewards=True,
-			eval_freq=50,
-			episodes=EPISODES
-		)
-		
-		training_data = {
-			'rewards': training_rewards,
-			'timesteps': timesteps,
-			'noise_std': noise_std,
-			'seed': seed,
-			'model_id': model_id
-		}
-		
-		print(f"  ✅ Training completato | Episodi: {len(training_rewards)}")
-		return trained_model, training_data, noise_std
-		
-	except Exception as e:
-		print(f"  ❌ Errore durante training modello {model_id}: {e}")
-		return None, None, noise_std
+    """
+    Allena un singolo modello SAC usando ambienti condivisi per livello di rumore
+    """
+    print(f"📈 Training Modello {model_id} | Noise STD: {noise_std:.4f}")
+    
+    try:
+        # Ottieni o crea ambiente condiviso per questo livello di rumore
+        train_env, env_name = get_or_create_noise_environment(
+            noise_level=noise_std,
+            noise_type='gaussian',
+            noise_mean=0.0,
+            dinamic_noise=dinamic_noise
+        )
+        
+        _, trained_model, training_rewards, timesteps = train_sac(
+            env=train_env,
+            seed=seed,
+            track_rewards=True,
+            eval_freq=50,
+            episodes=EPISODES
+        )
+        
+        training_data = {
+            'rewards': training_rewards,
+            'timesteps': timesteps,
+            'noise_std': noise_std,
+            'seed': seed,
+            'model_id': model_id,
+            'env_name': env_name  # Aggiungi nome ambiente
+        }
+        
+        print(f"  ✅ Training completato | Ambiente: {env_name} | Episodi: {len(training_rewards)}")
+        return trained_model, training_data, noise_std
+        
+    except Exception as e:
+        print(f"  ❌ Errore durante training modello {model_id}: {e}")
+        return None, None, noise_std
 
 class ExperienceBuffer:
 	"""
@@ -469,7 +456,7 @@ def train_ensemble_online_with_experience_replay(model_paths, env, max_episodes=
 					
 					obs = next_obs
 					step_count += 1
-					
+                    
 				except Exception as e:
 					print(f"  ⚠️  Errore step {step_count}: {e}")
 					break
@@ -648,7 +635,152 @@ def _evaluate_single_model_on_buffer(model, experience_buffer, num_episodes=None
         print(f"    ❌ Errore valutazione modello: {e}")
         return 0.0
 
+def get_or_create_noise_environment(noise_level, noise_type='gaussian', noise_mean=0.0, 
+                                   dinamic_noise=False, env_name=None):
+    """
+    Ottiene o crea un ambiente con rumore specifico (condiviso tra modelli)
+    
+    Parameters:
+    noise_level: float - Livello di rumore
+    noise_type: str - Tipo di rumore
+    noise_mean: float - Media del rumore  
+    dinamic_noise: bool - Se il rumore è dinamico
+    env_name: str - Nome dell'ambiente (opzionale)
+    
+    Returns:
+    env: Ambiente configurato con il rumore specificato
+    """
+    global _NOISE_ENVIRONMENTS
+    
+    if env_name is None:
+        env_name = f"env_{noise_type}_{noise_level:.3f}_{noise_mean:.3f}_dynamic_{dinamic_noise}"
+    
+    # Se l'ambiente esiste già, restituiscilo
+    if env_name in _NOISE_ENVIRONMENTS:
+        print(f"🔄 Riutilizzando ambiente esistente: {env_name}")
+        return _NOISE_ENVIRONMENTS[env_name]['env'], env_name
+    
+    print(f"🏗️  Creando nuovo ambiente: {env_name}")
+    
+    # Crea l'ambiente base
+    if noise_level == 0.0:
+        env = CityLearnEnv(**ENV_CONFIG)
+        env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
+        print(f"  🔹 Ambiente pulito (no noise)")
+    else:
+        env = CityLearnEnv(**ENV_CONFIG)
+        env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
+        env = TransformObservation(env, partial(
+            add_noise_to_observations_for_environment,
+            noise_level=noise_level,
+            noise_type=noise_type,
+            noise_mean=noise_mean,
+            dinamic_noise=dinamic_noise,
+            env_name=env_name  # Usa env_name invece di model_id
+        ))
+        print(f"  🔸 Ambiente con rumore {noise_type} (σ={noise_level:.3f}, μ={noise_mean:.3f}, dynamic={dinamic_noise})")
+    
+    # Salva nell'ambiente globale
+    _NOISE_ENVIRONMENTS[env_name] = {
+        'env': env,
+        'noise_level': noise_level,
+        'noise_type': noise_type,
+        'noise_mean': noise_mean,
+        'dinamic_noise': dinamic_noise,
+        'created_at': datetime.now().isoformat(),
+        'usage_count': 0
+    }
+    
+    return env, env_name
 
+def add_noise_to_observations_for_environment(observations, noise_level=0.15, noise_mean=0.0, 
+                                             noise_type='gaussian', dinamic_noise=False, env_name=None):
+    """
+    Versione per ambienti condivisi - usa env_name invece di model_id
+    """
+    if env_name is None:
+        raise ValueError("Il parametro 'env_name' è obbligatorio")
+    
+    return add_noise_to_observations(
+        observations=observations,
+        noise_level=noise_level,
+        noise_mean=noise_mean,
+        noise_type=noise_type,
+        dinamic_noise=dinamic_noise,
+        name=env_name  # Usa env_name come identificatore
+    )
 
+def clear_noise_environments():
+    """Pulisce tutti gli ambienti di rumore dalla memoria"""
+    global _NOISE_ENVIRONMENTS
+    count = len(_NOISE_ENVIRONMENTS)
+    _NOISE_ENVIRONMENTS.clear()
+    print(f"🧹 Rimossi {count} ambienti dalla memoria")
 
+def save_noise_environments_info(filepath=None):
+    """Salva informazioni sugli ambienti di rumore in un file CSV"""
+    global _NOISE_ENVIRONMENTS
+    
+    if filepath is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(RESULTS_DIR, f"noise_environments_{timestamp}.csv")
+    
+    # Prepara dati per CSV
+    csv_data = []
+    for name, info in _NOISE_ENVIRONMENTS.items():
+        csv_data.append({
+            'environment_name': name,
+            'noise_level': info['noise_level'],
+            'noise_type': info['noise_type'],
+            'noise_mean': info['noise_mean'],
+            'dinamic_noise': info['dinamic_noise'],
+            'created_at': info['created_at'],
+            'usage_count': info['usage_count']
+        })
+    
+    if csv_data:
+        df = pd.DataFrame(csv_data)
+        
+        metadata_lines = [
+            f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"# TOTAL ENVIRONMENTS: {len(csv_data)}",
+            f"# ACTIVE ENVIRONMENTS IN MEMORY",
+            "#",
+            "# COLUMNS:",
+            "# environment_name: Nome identificativo dell'ambiente",
+            "# noise_level: Livello di rumore (standard deviation)",
+            "# noise_type: Tipo di rumore (gaussian/uniform)",
+            "# noise_mean: Media del rumore",
+            "# dinamic_noise: Se il rumore è dinamico (True/False)",
+            "# created_at: Timestamp di creazione ambiente",
+            "# usage_count: Numero di volte che l'ambiente è stato utilizzato",
+            "#"
+        ]
+        
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, 'w') as f:
+            for line in metadata_lines:
+                f.write(line + '\n')
+            df.to_csv(f, index=False, float_format='%.6f')
+        
+        print(f"💾 Info ambienti salvate in: {filepath}")
+        print(f"📊 Dati: {len(csv_data)} ambienti × {len(df.columns)} colonne")
+    else:
+        print("⚠️  Nessun ambiente in memoria da salvare")
+        
+        with open(filepath, 'w') as f:
+            f.write(f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("# NO ENVIRONMENTS IN MEMORY\n")
+            f.write("#\n")
+            f.write("environment_name,noise_level,noise_type,noise_mean,dinamic_noise,created_at,usage_count\n")
 
+def get_environment_by_noise_level(noise_level, dinamic_noise=False):
+    """Ottieni ambiente esistente per livello di rumore specifico"""
+    global _NOISE_ENVIRONMENTS
+    
+    for name, info in _NOISE_ENVIRONMENTS.items():
+        if (abs(info['noise_level'] - noise_level) < 0.001 and 
+            info['dinamic_noise'] == dinamic_noise):
+            return info['env'], name
+    
+    return None, None

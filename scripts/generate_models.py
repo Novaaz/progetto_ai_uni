@@ -63,26 +63,70 @@ def save_data_to_csv(data, file_path):
 	print(f"Data saved to {file_path}")
 
 def main():
-	n = input("Quanti semi vuoi generare? (default 5)") or "5"
-	n = int(n)
-	seeds = initialize_res_dir(n)
-	m = input("Quante esecuzioni vuoi fare per ogni seed? (default 16 -> 8 normali e 8 dinamici)") or "8"
-	m = int(m)
-	noise_values = generate_noise_levels(m,0.0,0.9)
-	for seed in seeds:
-		for i in range(m):
-			noise_std = noise_values[i]
-			model, _, _ = train_model_with_noise(noise_std=noise_std, dinamic_noise=False, seed=seed, model_id="model_"+str(i))
-			model_path = os.path.join(RESULTS_DIR, MODELS_DIR, str(seed), f"s_{noise_std:.2f}.zip")
-			model.save(model_path)
-		for i in range(m):
-			if i == 0:
-				continue
-			noise_std = noise_values[i]
-			model, _, _ = train_model_with_noise(noise_std=noise_std, dinamic_noise=True, seed=seed, model_id="model_"+str(i+m))
-			model_path = os.path.join(RESULTS_DIR, MODELS_DIR, str(seed), f"d_{noise_std:.2f}.zip")
-			model.save(model_path)
-	clean_dead_dir()
+    n = input("Quanti semi vuoi generare? (default 5): ") or "5"
+    n = int(n)
+    seeds = initialize_res_dir(n)
+    
+    m = input("Quanti modelli per seed? (default 5 = 5s + 4d): ") or "5"
+    m = int(m)
+    
+    min_noise = float(input("Rumore minimo (default 0.0): ") or "0.0")
+    max_noise = float(input("Rumore massimo (default 0.8): ") or "0.8")
+    
+    # Genera livelli di rumore una sola volta
+    noise_values = generate_noise_levels(m, min_noise, max_noise)
+    
+    print(f"\n🎯 Generando modelli:")
+    print(f"   Seeds: {len(seeds)}")
+    print(f"   Livelli di rumore: {[f'{n:.3f}' for n in noise_values]}")
+    print(f"   Modelli per seed: {m} static + {m-1} dynamic")
+    
+    # Pre-crea tutti gli ambienti di rumore una volta sola
+    print(f"\n🏗️  Pre-creando ambienti di rumore...")
+    for noise_std in noise_values:
+        if noise_std >= 0.0:  # Solo per static con rumore
+            get_or_create_noise_environment(noise_std, 'gaussian', 0.0, False)
+        if noise_std > 0.0:  # Solo per dynamic con rumore  
+            get_or_create_noise_environment(noise_std, 'gaussian', 0.0, True)
+    
+    for seed in seeds:
+        print(f"\n📦 Seed {seed}:")
+        
+        # Modelli static
+        for i in range(m):
+            noise_std = noise_values[i]
+            model, _, _ = train_model_with_noise(
+                noise_std=noise_std, 
+                dinamic_noise=False, 
+                seed=seed, 
+                model_id=f"static_{i}"
+            )
+            
+            if model is not None:
+                model_path = os.path.join(RESULTS_DIR, MODELS_DIR, str(seed), f"s_{noise_std:.3f}.zip")
+                model.save(model_path)
+                print(f"    ✅ Static {noise_std:.3f}: {model_path}")
+        
+        # Modelli dynamic
+        for i in range(m):
+            if i == 0:  # Salta noise=0 per dynamic
+                continue
+            
+            noise_std = noise_values[i]
+            model, _, _ = train_model_with_noise(
+                noise_std=noise_std, 
+                dinamic_noise=True, 
+                seed=seed, 
+                model_id=f"dynamic_{i}"
+            )
+            
+            if model is not None:
+                model_path = os.path.join(RESULTS_DIR, MODELS_DIR, str(seed), f"d_{noise_std:.3f}.zip")
+                model.save(model_path)
+                print(f"    ✅ Dynamic {noise_std:.3f}: {model_path}")
+    
+    clean_dead_dir()
+    print("\n🎉 Generazione completata!")
 
 if __name__ == "__main__":
 	main()
