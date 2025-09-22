@@ -71,8 +71,6 @@ def create_random_test_env():
 		noise_type='gaussian',
 		dinamic_noise=False,
 		name='random_env',
-		noise_level=0.75,
-		noise_mean=0.25,
 	))
 	
 	return env

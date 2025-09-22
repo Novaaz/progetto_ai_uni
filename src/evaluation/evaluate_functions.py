@@ -70,34 +70,3 @@ def performance_evaluation(first_reward, second_reward, model_name):
 			print(f"→ Il modello {model_name} ha MIGLIORATO le prestazioni del {abs(improvement_ft):.2f}%")
 		else:
 			print(f"→ Il modello {model_name} ha PEGGIORATO le prestazioni del {abs(improvement_ft):.2f}%")
-
-def quick_evaluate(model, env, max_steps):
-	"""
-	Valuta rapidamente un singolo modello
-	"""
-	try:
-		obs, _ = env.reset()
-		total_reward = 0
-		steps = 0
-		
-		while steps < max_steps:
-			try:
-				action, _ = model.predict(obs, deterministic=True)
-				obs, reward, terminated, truncated, _ = env.step(action)
-				
-				reward_val = np.mean(reward) if hasattr(reward, '__iter__') else reward
-				total_reward += reward_val
-				steps += 1
-				
-				if terminated or truncated:
-					break
-					
-			except Exception as e:
-				print(f"    ⚠️  Errore durante valutazione step {steps}: {e}")
-				break
-		
-		return total_reward
-		
-	except Exception as e:
-		print(f"    ❌ Errore durante valutazione modello: {e}")
-		return -999999

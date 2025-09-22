@@ -40,9 +40,10 @@ def plot_performance_overview(df, save_dir):
     """
     plt.figure(figsize=(16, 10))
     
-    # Ordina per reward medio
-    var_means = df.groupby('variable_name')['total_reward'].mean().sort_values(ascending=False)
-    ordered_vars = var_means.index.tolist()
+    # Usa l'ordine di apparizione nel CSV (prima occorrenza)
+    ordered_vars = df['variable_name'].unique().tolist()
+    # Se preferisci ordine alfabetico, usa:
+    # ordered_vars = sorted(df['variable_name'].unique().tolist())
     
     # Boxplot
     sns.boxplot(data=df, x='variable_name', y='total_reward', order=ordered_vars)

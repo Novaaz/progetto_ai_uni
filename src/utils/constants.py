@@ -7,11 +7,17 @@ from citylearn.reward_function import SolarPenaltyAndComfortReward
 EXCLUDED_NOISE_LEVELS = []  
 EPISODES = 35
 UPDATE_FREQ = 75
-BATCH_SIZE = 256
-LEARNING_STARTS = 150
+BATCH_SIZE = 512
+LEARNING_STARTS = 200
 
 ENV_CONFIG = {
-	"schema": 'citylearn_challenge_2023_phase_1',
+	"schema": 'citylearn_challenge_2023_phase_2_local_evaluation',#'citylearn_challenge_2023_phase_1',
+	"central_agent": True,
+	'reward_function': SolarPenaltyAndComfortReward,
+}
+
+REAL_ENV_CONFIG = {
+	"schema": 'citylearn_challenge_2023_phase_2_online_evaluation_1',
 	"central_agent": True,
 	'reward_function': SolarPenaltyAndComfortReward,
 }
@@ -20,7 +26,7 @@ SAC_KWARGS = {
 	"learning_rate": 0.0003,
 	"tau": 0.005,
 	"gamma": 0.99,
-	"buffer_size": 10000,
+	"buffer_size": 100000,
 	"batch_size": BATCH_SIZE,
 	"learning_starts": LEARNING_STARTS,
 }

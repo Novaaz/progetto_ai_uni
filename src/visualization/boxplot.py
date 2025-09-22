@@ -219,34 +219,3 @@ def save_stats_csv(stats, directory):
 	df = pd.DataFrame(rows)
 	df.to_csv(filepath, index=False)
 	print(f"📄 Statistiche unificate salvate in: {filepath}")
-
-# def extract_and_group_data(results):
-#     """
-#     Estrae total_reward e raggruppa per tipo (s_/d_) e noise level.
-#     
-#     Returns:
-#         dict: {'static': {'0.05': [rewards]}, 'dynamic': {'0.10': [rewards]}}
-#     """
-#     grouped = {'static': {}, 'dynamic': {}}
-#     
-#     for result in results:
-#         name = result['name']
-#         reward = result['total_reward']
-#         
-#         # Determina tipo e noise level dal nome
-#         if name.startswith('s_'):
-#             model_type = 'static'
-#             noise = name.replace('s_', '').split('_')[0]  # s_0.05_xxx -> 0.05
-#         elif name.startswith('d_'):
-#             model_type = 'dynamic' 
-#             noise = name.replace('d_', '').split('_')[0]  # d_0.10_xxx -> 0.10
-#         else:
-#             continue
-#         
-#         # Aggiungi alla lista
-#         if noise not in grouped[model_type]:
-#             grouped[model_type][noise] = []
-#         grouped[model_type][noise].append(reward)
-#     
-#     return grouped
-

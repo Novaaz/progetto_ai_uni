@@ -4,97 +4,14 @@ from stable_baselines3 import SAC
 from ..utils.constants import *
 from ..utils.core import *
 from ..models.ensemble import WeightedEnsemble
-from ..evaluation.evaluate_functions import quick_evaluate
+from ..evaluation.evaluate_functions import evaluate_sac_performance
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from gymnasium.wrappers import TransformObservation
 from functools import partial
 import os
+import csv
 
-_NOISE_MEMORY = {}
 _NOISE_ENVIRONMENTS = {}
-
-def _generate_noise_array(size, noise_type='gaussian', noise_level=0.15, noise_mean=0.0):
-	"""
-	Genera un array di rumore con i parametri specificati.
-	
-	Parametri:
-	size: int - Dimensione dell'array di rumore
-	noise_type: str - Tipo di rumore ('gaussian' o 'uniform')
-	noise_level: float - Livello di rumore (std per gaussian, range per uniform)
-	noise_mean: float - Media del rumore (solo per gaussian)
-	
-	Returns:
-	np.ndarray - Array di rumore generato
-	"""
-	if noise_type == 'gaussian':
-		return np.random.normal(loc=noise_mean, scale=noise_level, size=size)
-	elif noise_type == 'uniform':
-		return np.random.uniform(low=-noise_level, high=noise_level, size=size)
-	else:
-		raise ValueError(f"Tipo di rumore '{noise_type}' non supportato. Usa 'gaussian' o 'uniform'.")
-
-def add_noise_to_observations(observations, noise_level=0.15, noise_mean=0.0, noise_type='gaussian', dinamic_noise=False, name=None):
-	"""
-	Aggiunge rumore alle osservazioni in base al tipo di rumore specificato.
-	Se dinamic_noise=False, il rumore viene pre-generato e riutilizzato per ogni step.
-	
-	Parametri:
-	observations: np.ndarray - Osservazioni originali
-	noise_level: float - Livello di rumore da aggiungere
-	noise_mean: float - Media del rumore (solo per rumore gaussiano)
-	noise_type: str - Tipo di rumore ('gaussian' o 'uniform')
-	dinamic_noise: bool - Se True, genera rumore nuovo ad ogni step. Se False, usa rumore pre-generato
-	name: str - Nome univoco per identificare questa istanza di rumore (necessario se dinamic_noise=False)
-	
-	Returns:
-	np.ndarray - Osservazioni con rumore aggiunto
-	"""    
-	global _NOISE_MEMORY
-	
-	obs = np.array(observations)
-	noisy_observations = obs.copy()
-
-	mask = np.zeros_like(noisy_observations, dtype=bool)
-	indices = [0, 1, 2, 5, 6, 12, 18, -1, -2, -3, -4]  # day_type, hour, occupant_count, diffuse_solar_irradiance, direct_solar_irradiance, electricity_pricing, cooling_demand,power_outage, cooling_set_point
-	mask[indices] = True
-
-	if dinamic_noise:
-		noise = _generate_noise_array(len(noisy_observations), noise_type, noise_level, noise_mean)
-	else:
-		if name is None:
-			raise ValueError("Il parametro 'name' è obbligatorio quando dinamic_noise=False")
-		
-		config_key = f"{name}_{noise_type}_{noise_level}_{noise_mean}_{len(obs)}"
-		
-		if config_key not in _NOISE_MEMORY:
-			print(f"🔊 Inizializzando memoria rumore per '{name}' - Generando 719 step di rumore")
-			
-			episode_noise = []
-			for step in range(719):
-				step_noise = _generate_noise_array(len(noisy_observations), noise_type, noise_level, noise_mean)
-				episode_noise.append(step_noise)
-			
-			_NOISE_MEMORY[config_key] = {
-				'episode_noise': episode_noise,
-				'current_step': 0,
-				'total_calls': 0,
-				'episodes_completed': 0
-			}
-		
-		memory_data = _NOISE_MEMORY[config_key]
-		current_step = memory_data['current_step']
-		noise = memory_data['episode_noise'][current_step]
-		
-		memory_data['total_calls'] += 1
-		memory_data['current_step'] = (current_step + 1) % 719
-		
-		if memory_data['current_step'] == 0:
-			memory_data['episodes_completed'] += 1
-
-	noisy_observations += noise
-	noisy_observations[mask] = obs[mask]
-	
-	return noisy_observations
 
 def train_sac(env, seed, sac_model=None, n=1, batch_size=BATCH_SIZE, learning_starts=LEARNING_STARTS, episodes=EPISODES, time_steps=None, track_rewards=False, eval_freq=1000, deterministic=True, use_episode_tracker=True, n_eval_episodes=3):
 	if sac_model is None:
@@ -271,43 +188,43 @@ def generate_noise_levels(n_models=10, min_noise=0.0, max_noise=0.5):
 	return noise_levels.tolist()
 
 def train_model_with_noise(noise_std, dinamic_noise, seed, model_id):
-    """
-    Allena un singolo modello SAC usando ambienti condivisi per livello di rumore
-    """
-    print(f"📈 Training Modello {model_id} | Noise STD: {noise_std:.4f}")
-    
-    try:
-        # Ottieni o crea ambiente condiviso per questo livello di rumore
-        train_env, env_name = get_or_create_noise_environment(
-            noise_level=noise_std,
-            noise_type='gaussian',
-            noise_mean=0.0,
-            dinamic_noise=dinamic_noise
-        )
-        
-        _, trained_model, training_rewards, timesteps = train_sac(
-            env=train_env,
-            seed=seed,
-            track_rewards=True,
-            eval_freq=50,
-            episodes=EPISODES
-        )
-        
-        training_data = {
-            'rewards': training_rewards,
-            'timesteps': timesteps,
-            'noise_std': noise_std,
-            'seed': seed,
-            'model_id': model_id,
-            'env_name': env_name  # Aggiungi nome ambiente
-        }
-        
-        print(f"  ✅ Training completato | Ambiente: {env_name} | Episodi: {len(training_rewards)}")
-        return trained_model, training_data, noise_std
-        
-    except Exception as e:
-        print(f"  ❌ Errore durante training modello {model_id}: {e}")
-        return None, None, noise_std
+	"""
+	Allena un singolo modello SAC usando ambienti condivisi per livello di rumore
+	"""
+	print(f"📈 Training Modello {model_id} | Noise STD: {noise_std:.4f}")
+	
+	try:
+		# Ottieni o crea ambiente condiviso per questo livello di rumore
+		train_env, env_name = get_or_create_noise_environment(
+			noise_level=noise_std,
+			noise_type='gaussian',
+			noise_mean=0.0,
+			dinamic_noise=dinamic_noise
+		)
+		
+		_, trained_model, training_rewards, timesteps = train_sac(
+			env=train_env,
+			seed=seed,
+			track_rewards=True,
+			eval_freq=50,
+			episodes=EPISODES
+		)
+		
+		training_data = {
+			'rewards': training_rewards,
+			'timesteps': timesteps,
+			'noise_std': noise_std,
+			'seed': seed,
+			'model_id': model_id,
+			'env_name': env_name  # Aggiungi nome ambiente
+		}
+		
+		print(f"  ✅ Training completato | Ambiente: {env_name} | Episodi: {len(training_rewards)}")
+		return trained_model, training_data, noise_std
+		
+	except Exception as e:
+		print(f"  ❌ Errore durante training modello {model_id}: {e}")
+		return None, None, noise_std
 
 class ExperienceBuffer:
 	"""
@@ -456,7 +373,7 @@ def train_ensemble_online_with_experience_replay(model_paths, env, max_episodes=
 					
 					obs = next_obs
 					step_count += 1
-                    
+					
 				except Exception as e:
 					print(f"  ⚠️  Errore step {step_count}: {e}")
 					break
@@ -572,215 +489,376 @@ def _train_ensemble_on_experiences(ensemble, experience_buffer, episodes, config
 			print(f"    ❌ Errore training modello {i}: {e}")
 
 def _evaluate_single_model_on_buffer(model, experience_buffer, num_episodes=None):
-    """
-    Valuta un singolo modello basandosi sulle esperienze nel buffer
-    
-    Parameters:
-    model: SAC - Modello da valutare
-    experience_buffer: ExperienceBuffer - Buffer con esperienze raccolte
-    num_episodes: int - Numero di episodi recenti da usare (None = tutti)
-    
-    Returns:
-    float: Performance stimata del modello
-    """
-    if experience_buffer.size() == 0:
-        print("    ⚠️  Buffer vuoto per valutazione")
-        return 0.0
-    
-    try:
-        if num_episodes is None:
-            episodes_to_use = experience_buffer.get_all_experiences()
-        else:
-            recent_episodes = experience_buffer.get_recent_experiences(num_episodes)
-            episodes_to_use = []
-            for episode in recent_episodes:
-                episodes_to_use.extend(episode)
-        
-        if len(episodes_to_use) == 0:
-            print("    ⚠️  Nessuna esperienza disponibile per valutazione")
-            return 0.0
-        
-        total_weighted_reward = 0.0
-        valid_experiences = 0
-        
-        for exp in episodes_to_use:
-            try:
-                # Predici azione con il modello
-                pred_action, _ = model.predict(exp['obs'], deterministic=True)
-                
-                # Calcola accuratezza confrontando con azione realmente presa
-                if hasattr(exp['action'], '__len__') and hasattr(pred_action, '__len__'):
-                    action_diff = np.mean(np.abs(pred_action - exp['action']))
-                    accuracy = np.exp(-action_diff)
-                else:
-                    action_diff = abs(pred_action - exp['action'])
-                    accuracy = np.exp(-action_diff)
-                
-                # Se il modello avrebbe fatto un'azione simile e la reward era buona
-                weighted_reward = exp['reward'] * accuracy
-                total_weighted_reward += weighted_reward
-                valid_experiences += 1
-                
-            except Exception as e:
-                continue
-        
-        if valid_experiences > 0:
-            performance = total_weighted_reward / valid_experiences
-        else:
-            performance = 0.0
-        
-        return performance
-        
-    except Exception as e:
-        print(f"    ❌ Errore valutazione modello: {e}")
-        return 0.0
+	"""
+	Valuta un singolo modello basandosi sulle esperienze nel buffer
+	
+	Parameters:
+	model: SAC - Modello da valutare
+	experience_buffer: ExperienceBuffer - Buffer con esperienze raccolte
+	num_episodes: int - Numero di episodi recenti da usare (None = tutti)
+	
+	Returns:
+	float: Performance stimata del modello
+	"""
+	if experience_buffer.size() == 0:
+		print("    ⚠️  Buffer vuoto per valutazione")
+		return 0.0
+	
+	try:
+		if num_episodes is None:
+			episodes_to_use = experience_buffer.get_all_experiences()
+		else:
+			recent_episodes = experience_buffer.get_recent_experiences(num_episodes)
+			episodes_to_use = []
+			for episode in recent_episodes:
+				episodes_to_use.extend(episode)
+		
+		if len(episodes_to_use) == 0:
+			print("    ⚠️  Nessuna esperienza disponibile per valutazione")
+			return 0.0
+		
+		total_weighted_reward = 0.0
+		valid_experiences = 0
+		
+		for exp in episodes_to_use:
+			try:
+				# Predici azione con il modello
+				pred_action, _ = model.predict(exp['obs'], deterministic=True)
+				
+				# Calcola accuratezza confrontando con azione realmente presa
+				if hasattr(exp['action'], '__len__') and hasattr(pred_action, '__len__'):
+					action_diff = np.mean(np.abs(pred_action - exp['action']))
+					accuracy = np.exp(-action_diff)
+				else:
+					action_diff = abs(pred_action - exp['action'])
+					accuracy = np.exp(-action_diff)
+				
+				# Se il modello avrebbe fatto un'azione simile e la reward era buona
+				weighted_reward = exp['reward'] * accuracy
+				total_weighted_reward += weighted_reward
+				valid_experiences += 1
+				
+			except Exception as e:
+				continue
+		
+		if valid_experiences > 0:
+			performance = total_weighted_reward / valid_experiences
+		else:
+			performance = 0.0
+		
+		return performance
+		
+	except Exception as e:
+		print(f"    ❌ Errore valutazione modello: {e}")
+		return 0.0
 
 def get_or_create_noise_environment(noise_level, noise_type='gaussian', noise_mean=0.0, 
-                                   dinamic_noise=False, env_name=None):
-    """
-    Ottiene o crea un ambiente con rumore specifico (condiviso tra modelli)
-    
-    Parameters:
-    noise_level: float - Livello di rumore
-    noise_type: str - Tipo di rumore
-    noise_mean: float - Media del rumore  
-    dinamic_noise: bool - Se il rumore è dinamico
-    env_name: str - Nome dell'ambiente (opzionale)
-    
-    Returns:
-    env: Ambiente configurato con il rumore specificato
-    """
-    global _NOISE_ENVIRONMENTS
-    
-    if env_name is None:
-        env_name = f"env_{noise_type}_{noise_level:.3f}_{noise_mean:.3f}_dynamic_{dinamic_noise}"
-    
-    # Se l'ambiente esiste già, restituiscilo
-    if env_name in _NOISE_ENVIRONMENTS:
-        print(f"🔄 Riutilizzando ambiente esistente: {env_name}")
-        return _NOISE_ENVIRONMENTS[env_name]['env'], env_name
-    
-    print(f"🏗️  Creando nuovo ambiente: {env_name}")
-    
-    # Crea l'ambiente base
-    if noise_level == 0.0:
-        env = CityLearnEnv(**ENV_CONFIG)
-        env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
-        print(f"  🔹 Ambiente pulito (no noise)")
-    else:
-        env = CityLearnEnv(**ENV_CONFIG)
-        env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
-        env = TransformObservation(env, partial(
-            add_noise_to_observations_for_environment,
-            noise_level=noise_level,
-            noise_type=noise_type,
-            noise_mean=noise_mean,
-            dinamic_noise=dinamic_noise,
-            env_name=env_name  # Usa env_name invece di model_id
-        ))
-        print(f"  🔸 Ambiente con rumore {noise_type} (σ={noise_level:.3f}, μ={noise_mean:.3f}, dynamic={dinamic_noise})")
-    
-    # Salva nell'ambiente globale
-    _NOISE_ENVIRONMENTS[env_name] = {
-        'env': env,
-        'noise_level': noise_level,
-        'noise_type': noise_type,
-        'noise_mean': noise_mean,
-        'dinamic_noise': dinamic_noise,
-        'created_at': datetime.now().isoformat(),
-        'usage_count': 0
-    }
-    
-    return env, env_name
-
-def add_noise_to_observations_for_environment(observations, noise_level=0.15, noise_mean=0.0, 
-                                             noise_type='gaussian', dinamic_noise=False, env_name=None):
-    """
-    Versione per ambienti condivisi - usa env_name invece di model_id
-    """
-    if env_name is None:
-        raise ValueError("Il parametro 'env_name' è obbligatorio")
-    
-    return add_noise_to_observations(
-        observations=observations,
-        noise_level=noise_level,
-        noise_mean=noise_mean,
-        noise_type=noise_type,
-        dinamic_noise=dinamic_noise,
-        name=env_name  # Usa env_name come identificatore
-    )
+								   dinamic_noise=False, env_name=None):
+	"""
+	Ottiene o crea un ambiente con rumore specifico (condiviso tra modelli)
+	
+	Parameters:
+	noise_level: float - Livello di rumore
+	noise_type: str - Tipo di rumore
+	noise_mean: float - Media del rumore  
+	dinamic_noise: bool - Se il rumore è dinamico
+	env_name: str - Nome dell'ambiente (opzionale)
+	
+	Returns:
+	env: Ambiente configurato con il rumore specificato
+	"""
+	global _NOISE_ENVIRONMENTS
+	
+	if env_name is None:
+		env_name = f"env_{noise_type}_{noise_level:.3f}_{noise_mean:.3f}_dynamic_{dinamic_noise}"
+	
+	# Se l'ambiente esiste già, restituiscilo
+	if env_name in _NOISE_ENVIRONMENTS:
+		print(f"🔄 Riutilizzando ambiente esistente: {env_name}")
+		return _NOISE_ENVIRONMENTS[env_name]['env'], env_name
+	
+	print(f"🏗️  Creando nuovo ambiente: {env_name}")
+	
+	# Crea l'ambiente base
+	if noise_level == 0.0:
+		env = CityLearnEnv(**ENV_CONFIG)
+		env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
+		print(f"  🔹 Ambiente pulito (no noise)")
+	else:
+		env = CityLearnEnv(**ENV_CONFIG)
+		env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
+		env = TransformObservation(env, partial(
+			add_noise_to_observations,
+			noise_level=noise_level,
+			noise_type=noise_type,
+			noise_mean=noise_mean,
+			dinamic_noise=dinamic_noise,
+			env_name=env_name  # Usa env_name invece di model_id
+		))
+		print(f"  🔸 Ambiente con rumore {noise_type} (σ={noise_level:.3f}, μ={noise_mean:.3f}, dynamic={dinamic_noise})")
+	
+	# Salva nell'ambiente globale
+	_NOISE_ENVIRONMENTS[env_name] = {
+		'env': env,
+		'noise_level': noise_level,
+		'noise_type': noise_type,
+		'noise_mean': noise_mean,
+		'dinamic_noise': dinamic_noise,
+		'created_at': datetime.now().isoformat(),
+		'usage_count': 0
+	}
+	
+	return env, env_name
 
 def clear_noise_environments():
-    """Pulisce tutti gli ambienti di rumore dalla memoria"""
-    global _NOISE_ENVIRONMENTS
-    count = len(_NOISE_ENVIRONMENTS)
-    _NOISE_ENVIRONMENTS.clear()
-    print(f"🧹 Rimossi {count} ambienti dalla memoria")
+	"""Pulisce tutti gli ambienti di rumore dalla memoria"""
+	global _NOISE_ENVIRONMENTS
+	count = len(_NOISE_ENVIRONMENTS)
+	_NOISE_ENVIRONMENTS.clear()
+	print(f"🧹 Rimossi {count} ambienti dalla memoria")
 
 def save_noise_environments_info(filepath=None):
-    """Salva informazioni sugli ambienti di rumore in un file CSV"""
-    global _NOISE_ENVIRONMENTS
-    
-    if filepath is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = os.path.join(RESULTS_DIR, f"noise_environments_{timestamp}.csv")
-    
-    # Prepara dati per CSV
-    csv_data = []
-    for name, info in _NOISE_ENVIRONMENTS.items():
-        csv_data.append({
-            'environment_name': name,
-            'noise_level': info['noise_level'],
-            'noise_type': info['noise_type'],
-            'noise_mean': info['noise_mean'],
-            'dinamic_noise': info['dinamic_noise'],
-            'created_at': info['created_at'],
-            'usage_count': info['usage_count']
-        })
-    
-    if csv_data:
-        df = pd.DataFrame(csv_data)
-        
-        metadata_lines = [
-            f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"# TOTAL ENVIRONMENTS: {len(csv_data)}",
-            f"# ACTIVE ENVIRONMENTS IN MEMORY",
-            "#",
-            "# COLUMNS:",
-            "# environment_name: Nome identificativo dell'ambiente",
-            "# noise_level: Livello di rumore (standard deviation)",
-            "# noise_type: Tipo di rumore (gaussian/uniform)",
-            "# noise_mean: Media del rumore",
-            "# dinamic_noise: Se il rumore è dinamico (True/False)",
-            "# created_at: Timestamp di creazione ambiente",
-            "# usage_count: Numero di volte che l'ambiente è stato utilizzato",
-            "#"
-        ]
-        
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w') as f:
-            for line in metadata_lines:
-                f.write(line + '\n')
-            df.to_csv(f, index=False, float_format='%.6f')
-        
-        print(f"💾 Info ambienti salvate in: {filepath}")
-        print(f"📊 Dati: {len(csv_data)} ambienti × {len(df.columns)} colonne")
-    else:
-        print("⚠️  Nessun ambiente in memoria da salvare")
-        
-        with open(filepath, 'w') as f:
-            f.write(f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("# NO ENVIRONMENTS IN MEMORY\n")
-            f.write("#\n")
-            f.write("environment_name,noise_level,noise_type,noise_mean,dinamic_noise,created_at,usage_count\n")
+	"""Salva informazioni sugli ambienti di rumore in un file CSV"""
+	global _NOISE_ENVIRONMENTS
+	
+	if filepath is None:
+		timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+		filepath = os.path.join(RESULTS_DIR, f"noise_environments_{timestamp}.csv")
+	
+	# Prepara dati per CSV
+	csv_data = []
+	for name, info in _NOISE_ENVIRONMENTS.items():
+		csv_data.append({
+			'environment_name': name,
+			'noise_level': info['noise_level'],
+			'noise_type': info['noise_type'],
+			'noise_mean': info['noise_mean'],
+			'dinamic_noise': info['dinamic_noise'],
+			'created_at': info['created_at'],
+			'usage_count': info['usage_count']
+		})
+	
+	if csv_data:
+		df = pd.DataFrame(csv_data)
+		
+		metadata_lines = [
+			f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+			f"# TOTAL ENVIRONMENTS: {len(csv_data)}",
+			f"# ACTIVE ENVIRONMENTS IN MEMORY",
+			"#",
+			"# COLUMNS:",
+			"# environment_name: Nome identificativo dell'ambiente",
+			"# noise_level: Livello di rumore (standard deviation)",
+			"# noise_type: Tipo di rumore (gaussian/uniform)",
+			"# noise_mean: Media del rumore",
+			"# dinamic_noise: Se il rumore è dinamico (True/False)",
+			"# created_at: Timestamp di creazione ambiente",
+			"# usage_count: Numero di volte che l'ambiente è stato utilizzato",
+			"#"
+		]
+		
+		os.makedirs(os.path.dirname(filepath), exist_ok=True)
+		with open(filepath, 'w') as f:
+			for line in metadata_lines:
+				f.write(line + '\n')
+			df.to_csv(f, index=False, float_format='%.6f')
+		
+		print(f"💾 Info ambienti salvate in: {filepath}")
+		print(f"📊 Dati: {len(csv_data)} ambienti × {len(df.columns)} colonne")
+	else:
+		print("⚠️  Nessun ambiente in memoria da salvare")
+		
+		with open(filepath, 'w') as f:
+			f.write(f"# NOISE ENVIRONMENTS INFO - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+			f.write("# NO ENVIRONMENTS IN MEMORY\n")
+			f.write("#\n")
+			f.write("environment_name,noise_level,noise_type,noise_mean,dinamic_noise,created_at,usage_count\n")
 
 def get_environment_by_noise_level(noise_level, dinamic_noise=False):
-    """Ottieni ambiente esistente per livello di rumore specifico"""
-    global _NOISE_ENVIRONMENTS
-    
-    for name, info in _NOISE_ENVIRONMENTS.items():
-        if (abs(info['noise_level'] - noise_level) < 0.001 and 
-            info['dinamic_noise'] == dinamic_noise):
-            return info['env'], name
-    
-    return None, None
+	"""Ottieni ambiente esistente per livello di rumore specifico"""
+	global _NOISE_ENVIRONMENTS
+	
+	for name, info in _NOISE_ENVIRONMENTS.items():
+		if (abs(info['noise_level'] - noise_level) < 0.001 and 
+			info['dinamic_noise'] == dinamic_noise):
+			return info['env'], name
+	
+	return None, None
+
+class AdaptiveAlphaCallback(BaseCallback):
+    def __init__(self, eval_env, pretrained_model=None, pretrained_reward=None,
+                eval_freq=5000, n_eval_episodes=1, tol=0.02, step_alpha=0.05,
+                log_path=None, verbose=0,
+                real_eval_env=None):
+        # Inizializza callback: env per valutazione, modello pretrained (opzionale),
+        # frequenza di valutazione, tolleranza e passo per aggiornare alpha.
+        super().__init__(verbose)
+        self.eval_env = eval_env
+        self.pretrained_model = pretrained_model
+        self.pretrained_reward = float(pretrained_reward) if pretrained_reward is not None else None
+        self.eval_freq = int(eval_freq)
+        self.n_eval_episodes = int(n_eval_episodes)
+        self.tol = float(tol)
+        self.step_alpha = float(step_alpha)
+        # percorso CSV per log degli snapshot
+        self.log_path = log_path or os.path.join(RESULTS_DIR, "logs", f"adaptive_alpha_cb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        # env da usare per valutazioni "reali" (se diverso dal main eval_env)
+        self.real_eval_env = real_eval_env or self.eval_env
+
+        # crea header CSV (step, valutazione, sim/real e alpha)
+        if not os.path.exists(self.log_path):
+            with open(self.log_path, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(["step", "mean_reward_eval_env", "sim_mean_reward", "real_mean_reward", "sim_to_real_gap", "alpha"])
+
+    def _on_training_start(self) -> None:
+        # Alla partenza: se non ho pretrained_reward, provo a calcolarlo dal pretrained_model
+        if self.pretrained_reward is None and self.pretrained_model is not None:
+            try:
+                res = evaluate_sac_performance(self.eval_env, self.pretrained_model, episode_name="pretrained_cb_benchmark")
+                self.pretrained_reward = float(res.get("total_reward", 0.0))
+                if self.verbose:
+                    print(f"[AdaptiveAlphaCallback] pretrained_reward (eval_env) = {self.pretrained_reward:.2f}")
+            except Exception:
+                self.pretrained_reward = None
+
+        # calcolo opzionale di riferimento sim/real per il pretrained (usato come target_gap)
+        self.pretrained_sim_reward = None
+        self.pretrained_real_reward = None
+        if self.pretrained_model is not None:
+            try:
+                r_sim = evaluate_sac_performance(self.eval_env, self.pretrained_model, episode_name="pretrained_sim")
+                self.pretrained_sim_reward = float(r_sim.get("total_reward", 0.0))
+            except Exception:
+                self.pretrained_sim_reward = None
+            try:
+                r_real = evaluate_sac_performance(self.real_eval_env, self.pretrained_model, episode_name="pretrained_real")
+                self.pretrained_real_reward = float(r_real.get("total_reward", 0.0))
+            except Exception:
+                self.pretrained_real_reward = None
+            if self.verbose:
+                print(f"[AdaptiveAlphaCallback] pretrained_sim={self.pretrained_sim_reward} pretrained_real={self.pretrained_real_reward}")
+
+    def _evaluate_on_env(self, env, n_eps):
+        # Esegue n_eps rollout valutativi sull'env passato e ritorna media delle total_reward
+        sumr = 0.0
+        for _ in range(n_eps):
+            res = evaluate_sac_performance(env, self.model, episode_name="adaptive_eval")
+            sumr += float(res.get("total_reward", 0.0))
+        return sumr / float(n_eps)
+
+    def _on_step(self) -> bool:
+        # Esegui valutazione solo ogni eval_freq chiamate
+        if self.eval_freq <= 0:
+            return True
+        if self.n_calls % self.eval_freq != 0:
+            return True
+
+        # valutazione principale (su eval_env)
+        try:
+            mean_r = self._evaluate_on_env(self.eval_env, self.n_eval_episodes)
+        except Exception as e:
+            if self.verbose:
+                print(f"[AdaptiveAlphaCallback] evaluation failed: {e}")
+            return True
+
+        # opzionalmente valutazioni separate su "sim" e "real" env
+        try:
+            sim_mean = self._evaluate_on_env(self.eval_env, self.n_eval_episodes)
+        except Exception:
+            sim_mean = None
+        try:
+            real_mean = self._evaluate_on_env(self.real_eval_env, self.n_eval_episodes)
+        except Exception:
+            real_mean = None
+
+        # calcolo gap sim->real se disponibili entrambe le valutazioni
+        sim_to_real_gap = None
+        if sim_mean is not None and real_mean is not None:
+            sim_to_real_gap = float(sim_mean - real_mean)
+
+        # leggo alpha corrente dal replay buffer (se esiste)
+        buf = getattr(self.model, "replay_buffer", None)
+        curr_alpha = None
+        if buf is not None:
+            curr_alpha = getattr(buf, "get_alpha", lambda: getattr(buf, "alpha", None))()
+
+        # adattamento semplice basato sul confronto con pretrained_reward (se disponibile)
+        if self.pretrained_reward is not None and buf is not None:
+            rel_diff = (mean_r - self.pretrained_reward) / (abs(self.pretrained_reward) + 1e-8)
+            if rel_diff < -self.tol:
+                # performance peggiora rispetto a pretrained -> aumenta peso offline (alpha++)
+                if hasattr(buf, "adjust_alpha_step"):
+                    buf.adjust_alpha_step(abs(self.step_alpha))
+                else:
+                    buf.alpha = min(1.0, getattr(buf, "alpha", 1.0) + abs(self.step_alpha))
+            elif rel_diff > self.tol:
+                # performance migliora -> riduci peso offline (alpha--)
+                if hasattr(buf, "adjust_alpha_step"):
+                    buf.adjust_alpha_step(-abs(self.step_alpha))
+                else:
+                    buf.alpha = max(0.0, getattr(buf, "alpha", 0.0) - abs(self.step_alpha))
+            curr_alpha = getattr(buf, "get_alpha", lambda: getattr(buf, "alpha", None))()
+
+        # scrivo riga di log CSV con valutazioni e alpha
+        with open(self.log_path, 'a', newline='') as f:
+            w = csv.writer(f)
+            w.writerow([int(self.n_calls), float(mean_r),
+                        (float(sim_mean) if sim_mean is not None else ""),
+                        (float(real_mean) if real_mean is not None else ""),
+                        (float(sim_to_real_gap) if sim_to_real_gap is not None else ""),
+                        (float(curr_alpha) if curr_alpha is not None else "")])
+
+        if self.verbose:
+            print(f"[AdaptiveAlphaCallback] step={self.n_calls} eval={mean_r:.2f} sim={sim_mean} real={real_mean} gap={sim_to_real_gap} alpha={curr_alpha}")
+
+        # --- logica alternativa: adattamento basato sul gap sim->real ---
+        # leggo di nuovo buffer e alpha corrente
+        buf = getattr(self.model, "replay_buffer", None)
+        curr_alpha = None
+        if buf is not None:
+            curr_alpha = getattr(buf, "get_alpha", lambda: getattr(buf, "alpha", None))()
+
+        # calcolo target_gap se ho il pretrained valutato su sim e real
+        target_gap = None
+        if hasattr(self, "pretrained_sim_reward") and self.pretrained_sim_reward is not None and hasattr(self, "pretrained_real_reward") and self.pretrained_real_reward is not None:
+            target_gap = float(self.pretrained_sim_reward - self.pretrained_real_reward)
+
+        # se ho entrambe le valutazioni sim e real, applico la regola basata sul gap
+        if buf is not None and sim_mean is not None and real_mean is not None:
+            model_gap = float(sim_mean - real_mean)
+            if target_gap is None:
+                # regola semplice: se gap ridotto sotto una tolleranza relativa -> più online
+                tol_gap = getattr(self, "gap_tol", 0.10)
+                if abs(model_gap) <= tol_gap * (abs(sim_mean) + 1e-8):
+                    # riduci contributo offline
+                    if hasattr(buf, "adjust_alpha_step"):
+                        buf.adjust_alpha_step(-abs(self.step_alpha))
+                    else:
+                        buf.alpha = max(0.0, buf.alpha - abs(self.step_alpha))
+                else:
+                    # aumenta contributo offline
+                    if hasattr(buf, "adjust_alpha_step"):
+                        buf.adjust_alpha_step(abs(self.step_alpha))
+                    else:
+                        buf.alpha = min(1.0, buf.alpha + abs(self.step_alpha))
+            else:
+                # confronto relativo rispetto al target_gap (pretrained or baseline)
+                gap_rel_diff = (model_gap - target_gap) / (abs(target_gap) + 1e-8)
+                if gap_rel_diff < -self.tol:
+                    # gap migliore del target -> più online
+                    if hasattr(buf, "adjust_alpha_step"):
+                        buf.adjust_alpha_step(-abs(self.step_alpha))
+                    else:
+                        buf.alpha = max(0.0, buf.alpha - abs(self.step_alpha))
+                elif gap_rel_diff > self.tol:
+                    # gap peggiore -> più offline
+                    if hasattr(buf, "adjust_alpha_step"):
+                        buf.adjust_alpha_step(abs(self.step_alpha))
+                    else:
+                        buf.alpha = min(1.0, buf.alpha + abs(self.step_alpha))
+            # aggiorno alpha per logging
+            curr_alpha = getattr(buf, "get_alpha", lambda: getattr(buf, "alpha", None))()
+
+        return True

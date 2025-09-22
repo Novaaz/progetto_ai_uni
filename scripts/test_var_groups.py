@@ -18,93 +18,20 @@ from src.utils.core import *
 from src.evaluation.evaluate_functions import evaluate_sac_performance
 from gymnasium.wrappers import TransformObservation
 
-#-15259.69
+from src.utils.noise import add_noise_to_observations, _NOISE_CONFIG as NOISE_CONFIG
 
-def get_intelligent_noise_config():
-    """Configurazione rumore intelligente basata su analisi."""
-    config = {
-        # ALTO RUMORE (0.8) - Variabili che beneficiano
-        11: 0.8,  # net_electricity_consumption (+27%)
-        8: 0.8,   # non_shiftable_load (+24%) 
-        19: 0.8,  # dhw_demand (+22%)
-        9: 0.8,   # solar_generation (+19%)
-        3: 0.8,   # outdoor_dry_bulb_temperature (+15%)
-                
-        # BASSO RUMORE (0.15) - Variabili neutre/sensibili ma non dannose
-        4: 0.15,   # outdoor_relative_humidity
-        15: 0.15,  # indoor_dry_bulb_temperature
-        16: 0.15,  # average_unmet_cooling_setpoint_difference
-        20: 0.15,  # cooling_device_efficiency
-        21: 0.15,  # dhw_device_efficiency
-        7:  0.65,   # carbon_intensity (+18%) 0.5 è buono 0.65 meglio
-        
-    }
-    
-    # ESCLUSE (nessun rumore) - Variabili temporali e problematiche
-    excluded = [
-        0,   # day_type (temporale)
-        1,   # hour (temporale)
-        2,   # occupant_count (comportamentale)
-        5,   # diffuse_solar_irradiance (problematica)
-        6,   # direct_solar_irradiance (problematica)
-        10,  # electrical_storage_soc
-        12,  # electricity_pricing (molto dannosa)
-        13,  # cooling_storage_soc
-        14,  # dhw_storage_soc
-        17,  # indoor_relative_humidity
-        18,  # cooling_demand (molto dannosa)
-        -4,  # power_outage (protetta)
-        -3,  # cooling_set_point (protetta)
-        -2,  # heating_set_point (protetta)
-        -1,  # dhw_set_point (protetta)
-    ]
-    
-    return config, excluded
-
-
-def add_intelligent_noise(observations, noise_config, excluded_vars, name=None):
-    """Applica rumore intelligente alle osservazioni."""
-    noisy_obs = observations.copy()
-    
-    for var_index, noise_level in noise_config.items():
-        # Salta se esclusa o fuori range
-        if var_index in excluded_vars or var_index >= len(noisy_obs) or var_index < 0:
-            continue
-            
-        # Applica rumore
-        noise = np.random.normal(0, noise_level)
-        original = noisy_obs[var_index]
-        noisy_obs[var_index] = np.clip(original + noise, 0.0, 1.0)
-        
-        # Debug per prime iterazioni
-        if name and False:  # Disabilitato per performance
-            print(f"[{name}] Var {var_index}: {original:.3f} -> {noisy_obs[var_index]:.3f} (noise: {noise_level})")
-    
-    return noisy_obs
-
-
-def create_intelligent_env(seed=100):
+def create_intelligent_env(seed=100, dinamic_noise=False):
     """Crea ambiente con rumore intelligente."""
     print("🧠 Creando ambiente con rumore intelligente...")
     
-    np.random.seed(seed)
     env = CityLearnEnv(**ENV_CONFIG)
     env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
     
-    noise_config, excluded = get_intelligent_noise_config()
-    
-    # Conta configurazione
-    high_noise = sum(1 for level in noise_config.values() if level >= 0.7)
-    low_noise = sum(1 for level in noise_config.values() if level < 0.7)
-    
-    print(f"   📈 {high_noise} variabili con alto rumore (0.8)")
-    print(f"   📉 {low_noise} variabili con basso rumore (0.15)")
-    print(f"   🚫 {len(excluded)} variabili escluse")
-    
-    env = TransformObservation(
-        env, 
-        f=partial(add_intelligent_noise, noise_config=noise_config, excluded_vars=excluded)
-    )
+    def _obs_with_intelligent_noise(obs):
+        arr = np.array(obs, dtype=float)
+        return add_noise_to_observations(arr, noise_type='gaussian', dinamic_noise=dinamic_noise, name=f"intelligent_{seed}", seed=seed)
+
+    env = TransformObservation(env, f=_obs_with_intelligent_noise)
     env.reset(seed=seed)
     
     print("   ✅ Ambiente con rumore intelligente creato")
@@ -115,6 +42,8 @@ def find_latest_csv():
     """Trova ultimo CSV single-variable."""
     csv_dir = os.path.join(RESULTS_DIR, CSV_DIR)
     files = glob.glob(os.path.join(csv_dir, "single_var_test_*.csv"))
+    if not files:
+        raise FileNotFoundError(f"Nessun CSV trovato in {csv_dir} matching single_var_test_*.csv")
     return max(files, key=os.path.getctime)
 
 
@@ -156,21 +85,21 @@ def main():
     print("Alto rumore dove conviene, basso sulle altre")
     
     seed = int(input("Seed (default 100): ") or "100")
-    episodes = int(input("Episodi (default 200): ") or "200")
-    
+    episodes = int(input("Episodi (default 35): ") or "35")
+
     try:
-        # Mostra configurazione
-        noise_config, excluded = get_intelligent_noise_config()
+        # Mostra configurazione dai valori in NOISE_CONFIG
+        noise_config = dict(NOISE_CONFIG)
+        excluded = []
         print(f"\n📋 CONFIGURAZIONE:")
         
         high_vars = [k for k, v in noise_config.items() if v >= 0.7]
         low_vars = [k for k, v in noise_config.items() if v < 0.7]
         
-        print(f"   🔥 Alto rumore (0.8): variabili {high_vars}")
-        print(f"   🔸 Basso rumore (0.15): variabili {low_vars}")
-        print(f"   🚫 Escluse: {excluded}")
+        print(f"   🔥 Alto rumore (>=0.7): variabili {high_vars}")
+        print(f"   🔸 Basso rumore (<0.7): variabili {low_vars}")
         
-        confirm = input(f"\nProcedere? (y/n): ").lower()
+        confirm = input(f"\nProcedere? (Y/n): ").lower() or 'y'
         if confirm not in ['y', 'yes', 's', 'si']:
             print("❌ Annullato")
             return

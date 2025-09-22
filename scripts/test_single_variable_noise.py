@@ -18,11 +18,10 @@ import glob
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.training.train_functions import (
-	_generate_noise_array, 
-	_NOISE_MEMORY, 
-	train_sac, 
+	train_sac,
 	generate_noise_levels
 )
+import src.utils.noise as noise_mod
 from src.utils.constants import *
 from src.utils.core import *
 from src.evaluation.evaluate_functions import quick_evaluate
@@ -31,7 +30,7 @@ from gymnasium.wrappers import TransformObservation
 from functools import partial
 
 def add_single_variable_noise(observations, variable_index, noise_level=0.15, noise_mean=0.0, 
-							 noise_type='gaussian',name=None):
+							 noise_type='gaussian', name=None, seed=None):
 	"""
 	Aggiunge rumore a una singola variabile delle osservazioni.
 	
@@ -46,52 +45,20 @@ def add_single_variable_noise(observations, variable_index, noise_level=0.15, no
 	Returns:
 	np.ndarray - Osservazioni con rumore aggiunto solo alla variabile specificata
 	"""
-	global _NOISE_MEMORY
-	
-	obs = np.array(observations)
-	noisy_observations = obs.copy()
-	
-	# Lista delle variabili che NON devono essere modificate (come nel codice esistente)
-	protected_indices = [0, 1, 2, -1, -2, -3, -4]  # day_type, hour, occupant_count, power_outage, cooling_set_point
-	
-	# Se la variabile è protetta, non applicare rumore
-	if variable_index in protected_indices or variable_index >= len(obs):
-		print(f"⚠️  Variabile {variable_index} protetta o non valida - nessun rumore applicato")
-		return noisy_observations
-	
-	config_key = f"{name}_var{variable_index}_{noise_type}_{noise_level}_{noise_mean}"
-	
-	if config_key not in _NOISE_MEMORY:
-		print(f"🔊 Inizializzando memoria rumore per variabile {variable_index} - '{name}'")
-		
-		# Genera rumore per 719 step (durata episodio)
-		episode_noise = []
-		for step in range(719):
-			step_noise = _generate_noise_array(1, noise_type, noise_level, noise_mean)[0]
-			episode_noise.append(step_noise)
-		
-		_NOISE_MEMORY[config_key] = {
-			'episode_noise': episode_noise,
-			'current_step': 0,
-			'total_calls': 0,
-			'episodes_completed': 0,
-			'variable_index': variable_index
-		}
-	
-	memory_data = _NOISE_MEMORY[config_key]
-	current_step = memory_data['current_step']
-	noise = memory_data['episode_noise'][current_step]
-	
-	memory_data['total_calls'] += 1
-	memory_data['current_step'] = (current_step + 1) % 719
-	
-	if memory_data['current_step'] == 0:
-		memory_data['episodes_completed'] += 1
-	
-	# Applica rumore solo alla variabile specificata
-	noisy_observations[variable_index] = np.clip(noisy_observations[variable_index]+noise, 0, 1) #limita a 0-1
-	
-	return noisy_observations
+	obs = np.array(observations, dtype=float)
+
+	orig_config = noise_mod._NOISE_CONFIG.copy()
+	try:
+		new_config = {k: v for k, v in orig_config.items() if k != variable_index}
+		new_config[variable_index] = float(noise_level)
+		noise_mod._NOISE_CONFIG = new_config
+
+		noisy = noise_mod.add_noise_to_observations(obs, noise_type=noise_type, dinamic_noise=False, name=name, seed=seed)
+
+	finally:
+		noise_mod._NOISE_CONFIG = orig_config
+
+	return noisy
 
 def get_citylearn_variable_info():
 	"""
@@ -105,24 +72,24 @@ def get_citylearn_variable_info():
 	# power_outage(-4), cooling_set_point(-3), heating_set_point(-2), dhw_set_point(-1)
 	
 	variable_info = {
-		# Variabili ambientali e energetiche (modificabili)
+		# Variabili ambientali e energetiche 
 		3: "outdoor_dry_bulb_temperature",
 		4: "outdoor_relative_humidity", 
 		#5: "diffuse_solar_irradiance", #
 		#6: "direct_solar_irradiance", #
-		7: "carbon_intensity",
-		8: "non_shiftable_load",
+		#7: "carbon_intensity",
+		#8: "non_shiftable_load",
 		9: "solar_generation",
 		10: "electrical_storage_soc",
-		11: "net_electricity_consumption",
+		#11: "net_electricity_consumption",
 		#12: "electricity_pricing", #
 		13: "cooling_storage_soc",
 		14: "dhw_storage_soc",
 		15: "indoor_dry_bulb_temperature",
-		16: "average_unmet_cooling_setpoint_difference",
+		#16: "average_unmet_cooling_setpoint_difference",
 		17: "indoor_relative_humidity",
 		#18: "cooling_demand", #
-		19: "dhw_demand",
+		#19: "dhw_demand",
 		20: "cooling_device_efficiency",
 		21: "dhw_device_efficiency"
 	}
@@ -162,7 +129,8 @@ def create_single_variable_environment(base_env, variable_index, noise_level, no
 			noise_level=noise_level,
 			noise_type=noise_type,
 			noise_mean=noise_mean,
-			name=env_name
+			name=env_name,
+			seed=None
 		)
 	)
 
@@ -346,7 +314,7 @@ def save_progress_checkpoint(results_dir, current_state):
 		'failed_models': current_state.get('failed_models', []),
 		'total_results': len(current_state.get('all_results', [])),
 		'last_model_id': current_state.get('last_model_id'),
-		'noise_memory_keys': list(_NOISE_MEMORY.keys()) if _NOISE_MEMORY else []
+		'noise_memory_keys': list(noise_mod._NOISE_MEMORY.keys()) if noise_mod._NOISE_MEMORY else []
 	}
 	
 	checkpoint_path = os.path.join(results_dir, "recovery_checkpoint.json")
