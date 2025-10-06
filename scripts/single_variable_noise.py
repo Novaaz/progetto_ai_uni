@@ -67,9 +67,6 @@ def get_citylearn_variable_info():
 	Returns:
 	dict: Dizionario con indici e nomi delle variabili modificabili
 	"""
-	# Basato sulle osservazioni standard di CityLearn
-	# Escludiamo le variabili protette: day_type(0), hour(1), occupant_count(2), 
-	# power_outage(-4), cooling_set_point(-3), heating_set_point(-2), dhw_set_point(-1)
 	
 	variable_info = {
 		# Variabili ambientali e energetiche 

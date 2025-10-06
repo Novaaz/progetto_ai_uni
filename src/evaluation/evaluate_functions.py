@@ -39,7 +39,7 @@ def evaluate_sac_performance(env, sac_model, episode_name="Model"):
 		print(f"Errore durante la valutazione di {episode_name}: {e}")
 	
 	print(f"Ricompensa totale per {episode_name}: {total_reward:.2f}")
-	
+	env.reset()
 	return {
 		"name": episode_name,
 		"total_reward": total_reward,

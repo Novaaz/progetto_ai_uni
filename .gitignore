@@ -183,6 +183,8 @@ build/
 logs/
 results/
 archive/
+models/
+models_dyn
 
 # Additional build directories
 dist/

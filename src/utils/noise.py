@@ -1,23 +1,26 @@
 import numpy as np
+import sys
+import os
+from gymnasium.wrappers import TransformObservation
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.training.train_functions import train_sac
+from src.utils.constants import *
+from src.utils.core import *
 
 _NOISE_MEMORY = {}
 _NOISE_RAMPUP = 0.1
 _NOISE_RAMPUP_STEP = 0.15
 _NOISE_RAMPUP_EP = 4
 _NOISE_CONFIG = {
-	# ALTO RUMORE (0.8) - Variabili che beneficiano
-	3: 0.8,   # outdoor_dry_bulb_temperature
-	7:  0.65,  # carbon_intensity 0.5 è buono 0.65 meglio
-	#8: 0.8,   # non_shiftable_load 
-	9: 0.8,   # solar_generation
-	11: 0.8,  # net_electricity_consumption
-	19: 0.8,  # dhw_demand
-			
-	# BASSO RUMORE (0.15) - Variabili neutre/sensibili ma non dannose
-	4: 0.15,   # outdoor_relative_humidity
-	15: 0.15,  # indoor_dry_bulb_temperature
-	20: 0.15,  # cooling_device_efficiency
-	21: 0.15,  # dhw_device_efficiency
+	3:  0.0,   # outdoor_dry_bulb_temperature
+	7:  0.0,  # carbon_intensity
+	9:  0.0,   # solar_generation
+	11: 0.0,  # net_electricity_consumption
+	19: 0.0,  # dhw_demand
+	4:  0.0,   # outdoor_relative_humidity
+	15: 0.0,  # indoor_dry_bulb_temperature
+	20: 0.0,  # cooling_device_efficiency
+	21: 0.0,  # dhw_device_efficiency
 }
 
 
@@ -50,7 +53,7 @@ def _generate_noise_array(obs, noise_type='gaussian', step=0, seed=None):
 			raise ValueError(f"Tipo di rumore '{noise_type}' non supportato. Usa 'gaussian' o 'uniform'.")
 	return noise	
 
-def add_noise_to_observations(observations, noise_type='gaussian', dinamic_noise=False, name=None, seed=None):
+def add_noise_to_observations(observations, steps, noise_type='gaussian', dinamic_noise=False, name=None, seed=None):
 	"""
 	Aggiunge rumore alle osservazioni in base al tipo di rumore specificato.
 	Se dinamic_noise=False, il rumore viene pre-generato e riutilizzato per ogni step.
@@ -91,7 +94,7 @@ def add_noise_to_observations(observations, noise_type='gaussian', dinamic_noise
 		memory_data = _NOISE_MEMORY[config_key]
 		memory_data['current_step'] = (memory_data['current_step'] + 1)
 
-		if memory_data['current_step'] % 719 == 0:
+		if memory_data['current_step'] % steps == 0:
 			memory_data['episodes_completed'] += 1
 			if memory_data['episodes_completed'] % _NOISE_RAMPUP_EP == 0:
 				_NOISE_RAMPUP = _NOISE_RAMPUP + _NOISE_RAMPUP_STEP
@@ -103,10 +106,10 @@ def add_noise_to_observations(observations, noise_type='gaussian', dinamic_noise
 		config_key = f"{name}_{noise_type}_{seed}"
 		
 		if config_key not in _NOISE_MEMORY:
-			print(f"🔊 Inizializzando memoria rumore per '{name}' - Generando 719 step di rumore (seed={seed})")
+			print(f"🔊 Inizializzando memoria rumore per '{name}' - Generando {steps} step di rumore (seed={seed})")
 			_NOISE_RAMPUP = 1.0  # così viene sempre skippato il min() alla generazione
 			episode_noise = []
-			for step in range(720):
+			for step in range(steps):
 				step_noise = _generate_noise_array(len(noisy_observations), noise_type, step, seed)
 				episode_noise.append(step_noise)
 			
@@ -121,7 +124,7 @@ def add_noise_to_observations(observations, noise_type='gaussian', dinamic_noise
 		current_step = memory_data['current_step']
 		noise = memory_data['episode_noise'][current_step]
 		
-		memory_data['current_step'] = (current_step + 1) % 719
+		memory_data['current_step'] = (current_step + 1) % steps
 		
 		if memory_data['current_step'] == 0:
 			memory_data['episodes_completed'] += 1
@@ -129,3 +132,62 @@ def add_noise_to_observations(observations, noise_type='gaussian', dinamic_noise
 	noisy_observations += noise
 	
 	return noisy_observations
+
+def create_intelligent_env(seed=100, dinamic_noise=False, noise=None):
+    """
+    Crea ambiente con rumore "intelligente".
+    Parametri:
+    - seed: seed per riproducibilità
+    - dinamic_noise: se True genera rumore dinamico ogni step
+    - noise: se None usa NOISE_CONFIG; se float imposta tutti i key di NOISE_CONFIG a quel valore;
+             se dict permette sovrascrivere singole variabili {idx: value}
+    - persist_noise: se True scrive la nuova config in noise_mod._NOISE_CONFIG (comportamento corrente).
+                     Se False non modifica la config globale ma la applica comunque all'ambiente (meno comune).
+    Nota: add_noise_to_observations usa la variabile globale _NOISE_CONFIG, quindi per avere una config
+          dedicata all'ambiente aggiorniamo quella globale (persist_noise=True).
+    """
+    global _NOISE_CONFIG, _NOISE_MEMORY, _NOISE_RAMPUP
+
+    print("🧠 Creando ambiente con rumore intelligente...")
+    env = CityLearnEnv(**ENV_CONFIG)
+    env = StableBaselines3Wrapper(NormalizedSpaceWrapper(env))
+
+    # salva config originale e costruisci nuova config in base all'argomento `noise`
+    orig_config = _NOISE_CONFIG.copy() if isinstance(_NOISE_CONFIG, dict) else {}
+    if noise is None:
+        new_config = orig_config.copy()
+    elif isinstance(noise, dict):
+        new_config = orig_config.copy()
+        for k, v in noise.items():
+            new_config[int(k)] = float(v)
+    else:
+        new_config = {int(k): float(noise) for k in orig_config.keys()}
+
+    print(new_config)
+
+    name_token = f"intelligent_{seed}"
+    if noise is not None:
+        name_token += f"_{str(noise).replace(' ', '')}"
+
+    # aggiorniamo la config globale e rimuoviamo eventuale cache collegata al name_token
+    _NOISE_CONFIG = new_config.copy()
+    for k in list(_NOISE_MEMORY.keys()):
+        if k.startswith(f"{name_token}_") or k.startswith(f"{name_token}"):
+            del _NOISE_MEMORY[k]
+
+    def _obs_with_intelligent_noise(obs):
+        arr = np.array(obs, dtype=float)
+        return add_noise_to_observations(
+            arr,
+			steps=env.unwrapped.time_steps,
+            noise_type='gaussian',
+            dinamic_noise=dinamic_noise,
+            name=name_token,
+            seed=seed
+        )
+
+    env = TransformObservation(env, f=_obs_with_intelligent_noise)
+    env.reset(seed=seed)
+
+    print("   ✅ Ambiente con rumore intelligente creato (noise applied)")
+    return env

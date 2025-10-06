@@ -10,7 +10,7 @@
   "seconds_per_time_step": 3600.0,
   "observations": {
     "month": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "day_type": {
@@ -22,7 +22,7 @@
       "shared_in_central_agent": true
     },
     "daylight_savings_status": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_dry_bulb_temperature": {
@@ -42,19 +42,19 @@
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity_predicted_1": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity_predicted_2": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "outdoor_relative_humidity_predicted_3": {
-      "active": false,
+      "active": true,
       "shared_in_central_agent": true
     },
     "diffuse_solar_irradiance": {
@@ -95,43 +95,43 @@
     },
     "indoor_dry_bulb_temperature": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "average_unmet_cooling_setpoint_difference": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "indoor_relative_humidity": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "non_shiftable_load": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "solar_generation": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "cooling_storage_soc": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "heating_storage_soc": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "dhw_storage_soc": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "electrical_storage_soc": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "net_electricity_consumption": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "electricity_pricing": {
       "active": true,
@@ -150,76 +150,76 @@
       "shared_in_central_agent": true
     },
     "cooling_device_efficiency": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "heating_device_efficiency": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "cooling_demand": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "heating_demand": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "dhw_demand": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "cooling_electricity_consumption": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "heating_electricity_consumption": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "dhw_electricity_consumption": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "occupant_count": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "power_outage": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "hvac_mode": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "comfort_band": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "indoor_dry_bulb_temperature_cooling_set_point": {
       "active": true,
-      "shared_in_central_agent": false
+      "shared_in_central_agent": true
     },
     "indoor_dry_bulb_temperature_heating_set_point": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "indoor_dry_bulb_temperature_cooling_delta": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     },
     "indoor_dry_bulb_temperature_heating_delta": {
-      "active": false,
-      "shared_in_central_agent": false
+      "active": true,
+      "shared_in_central_agent": true
     }
   },
   "actions": {
     "cooling_storage": {
-      "active": false
+      "active": true
     },
     "heating_storage": {
-      "active": false
+      "active": true
     },
     "dhw_storage": {
       "active": true
@@ -231,10 +231,10 @@
       "active": true
     },
     "heating_device": {
-      "active": false
+      "active": true
     },
     "cooling_or_heating_device": {
-      "active": false
+      "active": true
     }
   },
   "agent": {
